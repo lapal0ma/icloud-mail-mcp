@@ -1,0 +1,9 @@
+# Python dependencies
+mcp[cli]
+aioimaplib
+beautifulsoup4
+lxml
+apscheduler
+aiosqlite
+python-dotenv
+pydantic
