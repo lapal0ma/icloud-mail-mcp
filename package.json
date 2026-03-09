@@ -1,0 +1,11 @@
+{
+  "name": "icloud-mail-mcp-liz",
+  "version": "1.0.0",
+  "description": "iCloud Mail MCP bridge plugin for OpenClaw",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

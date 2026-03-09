@@ -1,0 +1,12 @@
+{
+  "id": "icloud-mail-mcp-liz",
+  "name": "iCloud Mail MCP",
+  "description": "Bridges the iCloud Mail MCP Python server as native OpenClaw agent tools.",
+  "version": "1.0.0",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
