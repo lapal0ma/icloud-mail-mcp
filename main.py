@@ -123,22 +123,29 @@ async def _dispatch(name: str, args: dict):  # noqa: PLR0911
 # Startup
 # ---------------------------------------------------------------------------
 
+async def _background_sync() -> None:
+    HKT = timezone(timedelta(hours=8))
+    first_of_month = datetime.now(HKT).replace(day=1).strftime("%d-%b-%Y")
+    logger.info("Running initial sync from %s", first_of_month)
+    try:
+        stored = await fetch_new_emails(since_date=first_of_month)
+        logger.info("Initial sync complete — %d email(s) stored", len(stored))
+    except Exception as exc:
+        logger.error("Initial sync failed: %s", exc)
+
+
 async def _startup() -> None:
     await create_tables()
     logger.info("Database tables ready")
     scheduler = create_scheduler()
     scheduler.start()
     logger.info("Scheduler started")
-    HKT = timezone(timedelta(hours=8))
-    first_of_month = datetime.now(HKT).replace(day=1).strftime("%d-%b-%Y")
-    logger.info("Running initial sync from %s", first_of_month)
-    stored = await fetch_new_emails(since_date=first_of_month)
-    logger.info("Initial sync complete — %d email(s) stored", len(stored))
 
 
 async def main() -> None:
     await _startup()
     async with stdio_server() as (read_stream, write_stream):
+        asyncio.create_task(_background_sync())
         await app.run(read_stream, write_stream, app.create_initialization_options())
 
 

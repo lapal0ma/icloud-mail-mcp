@@ -132,6 +132,8 @@ openclaw gateway restart
 
 ## Development Log
 
+### 2026-03-09
+
 ### Problem: IMAP fetch returned empty sender/subject
 **Reason:** iCloud IMAP returns empty data when fetching with `RFC822`. The standard fetch command doesn't work on iCloud's server.
 **Revision:** Switched to `BODY.PEEK[]` fetch command. Also fixed `bytearray` vs `bytes` type mismatch — `aioimaplib` returns `bytearray` at `msg_data[1]`, requiring explicit `bytes(raw)` conversion.
@@ -148,6 +150,28 @@ openclaw gateway restart
 **Reason:** jiti injects `__dirname` as a module-local variable, not on `globalThis`. Accessing it via `globalThis.__dirname` returned `""`.
 **Revision:** Added `declare const __dirname: string` to use the jiti-injected value directly.
 
+### 2026-03-10
+
 ### Problem: Email agent (non-default workspace) had zero plugin tools
-**Reason:** OpenClaw caches the plugin registry by workspace path. The gateway calls `service.start()` only for the default workspace's registry. Non-default agents (with a different `workspace`) get a fresh registry where `service.start()` never runs — so `registerTool()` calls inside `start()` never execute.
-**Revision:** Restructured `index.ts` to register all 19 tools synchronously in `register(api)` using a static `TOOL_DEFS` array (mirroring `main.py`'s `TOOLS` list). Each tool's `execute()` awaits a module-level `_clientReady` promise that resolves when `service.start()` completes. Module-level singletons (`_client`, `_clientReady`, `_serviceRegistered`) ensure the MCP process is only spawned once regardless of how many registry instances load the plugin.
+**Reason:** OpenClaw caches the plugin registry by workspace path. Non-default agents get a fresh registry where `service.start()` never runs — tools registered inside `start()` never appear.
+**Revision:** Moved all 19 `registerTool()` calls to the synchronous `register(api)` body using a static `TOOL_DEFS` array. Each `execute()` awaits a module-level `_clientReady` promise that resolves once `start()` finishes initialization.
+
+### Problem: `_serviceRegistered` guard silently skipped service registration for email agent
+**Reason:** The guard called `api.registerService()` only once — but each agent's registry gets its own `api`. The email agent's `api` never got `registerService`, so `start()` was never called for it.
+**Revision:** Removed the guard. `registerService` is called on every `api`. Spawn is guarded by `if (_client) return` inside `start()` instead.
+
+### Problem: `stop()` from any registry killed the shared MCP process
+**Reason:** Any registry calling `stop()` would `_client.stop()` and null out the singleton, breaking all other agents.
+**Revision:** Added `_registryCount` reference counter — only kill the process when it reaches zero.
+
+### Problem: All tool calls hung forever — `_clientReady` race condition (root cause)
+**Reason:** `_clientReady` was created lazily in `getClientReady()`. If `start()` completed before any `execute()` called `getClientReady()`, `_resolveReady` was still `null` when `_resolveReady!()` fired — a no-op. Every subsequent tool call awaited a promise that would never resolve.
+**Revision:** Create `_clientReady = new Promise(...)` at the top of `start()` before spawning, so `_resolveReady` is always set before it's called.
+
+### Problem: Stale `_client` after MCP process crash prevented respawn
+**Reason:** `_client` stayed non-null after the Python process exited. Next `start()` hit `if (_client) return` and skipped respawning.
+**Revision:** `proc.on("exit")` handler resets `_client`, `_clientReady`, and `_resolveReady` to `null`.
+
+### Problem: main.py blocked stdio during startup — `initialize` handshake timed out
+**Reason:** Initial IMAP fetch (~70 s, 236 emails) ran before `stdio_server()` opened, blocking the MCP handshake.
+**Revision:** Moved `asyncio.create_task(_background_sync())` inside `main()` after `stdio_server()` opens. Server is ready immediately; sync runs in the background.

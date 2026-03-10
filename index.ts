@@ -92,6 +92,10 @@ class McpClient {
       this.ready = false;
       for (const h of this.pending.values()) h.reject(new Error("MCP process exited"));
       this.pending.clear();
+      // Reset module-level singletons so next start() will respawn
+      _client = null;
+      _clientReady = null;
+      _resolveReady = null;
     });
   }
 
@@ -182,6 +186,7 @@ const PYTHON =
 let _client: McpClient | null = null;
 let _clientReady: Promise<void> | null = null;
 let _resolveReady: (() => void) | null = null;
+let _registryCount = 0;
 
 function getClientReady(): Promise<void> {
   if (!_clientReady) {
@@ -196,16 +201,8 @@ function getClientReady(): Promise<void> {
 // Plugin entry point
 // ---------------------------------------------------------------------------
 
-let _serviceRegistered = false;
-
 export default function register(api: any): void {
   const scriptPath = path.resolve(_pluginDir, "main.py");
-
-  // Ensure singleton client exists (first call wins)
-  if (!_client) {
-    _client = new McpClient(api.logger);
-  }
-  const client = _client;
 
   // Register all 19 tools synchronously — execute() awaits client readiness
   api.logger.info(`[icloud-mail-mcp] register() called — registering ${TOOL_DEFS.length} tools synchronously`);
@@ -218,7 +215,7 @@ export default function register(api: any): void {
         parameters: def.inputSchema,
         async execute(_id: string, params: Record<string, unknown>) {
           await getClientReady();
-          const text = await client.callTool(toolName, params);
+          const text = await _client!.callTool(toolName, params);
           return { content: [{ type: "text", text }] };
         },
       },
@@ -226,30 +223,34 @@ export default function register(api: any): void {
     );
   }
 
-  // Service manages process lifecycle only — register once across all registry instances
-  if (!_serviceRegistered) {
-    _serviceRegistered = true;
-    api.registerService({
-      id: "icloud-mail-mcp-process",
-      start: async () => {
-        api.logger.info("[icloud-mail-mcp] Starting MCP server process...");
-        client.start(PYTHON, scriptPath, _pluginDir);
-        await client.initialize();
-        api.logger.info("[icloud-mail-mcp] MCP client ready (19 tools available)");
-        if (_resolveReady) {
-          _resolveReady();
-          _resolveReady = null;
-        }
-      },
-      stop: async () => {
-        api.logger.info("[icloud-mail-mcp] Stopping MCP server process...");
-        client.stop();
-        // Reset so next start() creates a fresh readiness promise
-        _clientReady = null;
-        _resolveReady = null;
+  // Register service on every api instance. Guard the actual spawn with _client.
+  api.registerService({
+    id: "icloud-mail-mcp-process",
+    start: async () => {
+      _registryCount++;
+      if (_client) return; // already spawned by another registry
+      // Create readiness promise BEFORE spawning so execute() calls that arrive
+      // during initialization will await it correctly
+      _clientReady = new Promise<void>((resolve) => {
+        _resolveReady = resolve;
+      });
+      _client = new McpClient(api.logger);
+      api.logger.info("[icloud-mail-mcp] Starting MCP server process...");
+      _client.start(PYTHON, scriptPath, _pluginDir);
+      await _client.initialize();
+      api.logger.info("[icloud-mail-mcp] MCP client ready (19 tools available)");
+      _resolveReady!();
+      _resolveReady = null;
+    },
+    stop: async () => {
+      _registryCount = Math.max(0, _registryCount - 1);
+      if (_registryCount > 0) return;
+      if (_client) {
+        _client.stop();
         _client = null;
-        _serviceRegistered = false;
-      },
-    });
-  }
+      }
+      _clientReady = null;
+      _resolveReady = null;
+    },
+  });
 }
