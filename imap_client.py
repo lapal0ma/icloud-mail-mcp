@@ -10,7 +10,7 @@ import aioimaplib
 from bs4 import BeautifulSoup
 
 from config import ICLOUD_EMAIL, ICLOUD_APP_PASSWORD
-from database import insert_raw_email, update_email_category, bump_filter_stat
+from database import insert_raw_email, update_email_category, bump_filter_stat, get_sync_state, set_sync_state
 from email_filter import should_filter
 
 logger = logging.getLogger(__name__)
@@ -130,17 +130,28 @@ async def fetch_new_emails(
 ) -> list[str]:
     """
     Fetch emails from iCloud and persist them via database.py.
-    Pass since_date (DD-Mon-YYYY) to override the since_days rolling window.
+    Uses incremental sync: stores last sync date in sync_state and only fetches
+    newer messages on subsequent runs. Falls back to since_days window on first run.
+    Pass since_date (DD-Mon-YYYY) to override both (e.g. initial backfill).
     Returns list of stored email IDs.
     """
     client = await _connect_with_retry()
     stored_ids: list[str] = []
+    state_key = f"last_sync_date_{mailbox}"
 
     try:
         await client.select(mailbox)
 
         if since_date is None:
-            since_date = (datetime.now(HKT) - timedelta(days=since_days)).strftime("%d-%b-%Y")
+            last = await get_sync_state(state_key, db_path=db_path)
+            if last:
+                # Re-use the stored date directly (already DD-Mon-YYYY)
+                since_date = last
+                logger.info("Incremental sync from %s", since_date)
+            else:
+                since_date = (datetime.now(HKT) - timedelta(days=since_days)).strftime("%d-%b-%Y")
+                logger.info("First sync, falling back to %d-day window (%s)", since_days, since_date)
+
         _, data = await client.search(f'SINCE {since_date}')
         uids = data[0].split() if data and data[0] else []
         logger.info("Found %d messages since %s", len(uids), since_date)
@@ -210,6 +221,10 @@ async def fetch_new_emails(
 
             except Exception as exc:
                 logger.error("Failed to process uid=%s: %s", uid, exc)
+
+        # Persist today's date so next sync only fetches newer messages
+        today_str = datetime.now(HKT).strftime("%d-%b-%Y")
+        await set_sync_state(state_key, today_str, db_path=db_path)
 
     finally:
         try:

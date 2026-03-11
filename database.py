@@ -98,6 +98,12 @@ CREATE TABLE IF NOT EXISTS unprocessed_queue (
     reason      TEXT,
     created_at  TEXT
 );
+
+CREATE TABLE IF NOT EXISTS sync_state (
+    key         TEXT PRIMARY KEY,
+    value       TEXT,
+    updated_at  TEXT
+);
 """
 
 
@@ -475,3 +481,26 @@ async def get_filter_stats(days: int = 7, db_path: str = DB_PATH) -> list[dict]:
             (f"-{days} days",),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# sync_state
+# ---------------------------------------------------------------------------
+
+async def get_sync_state(key: str, db_path: str = DB_PATH) -> Optional[str]:
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute(
+            "SELECT value FROM sync_state WHERE key = ?", (key,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
+
+
+async def set_sync_state(key: str, value: str, db_path: str = DB_PATH) -> None:
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """INSERT INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+            (key, value, now_hkt()),
+        )
+        await db.commit()
