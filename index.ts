@@ -152,13 +152,15 @@ const TOOL_DEFS = [
   { name: "get_email_detail", description: "Return full detail for a single email", inputSchema: { type: "object", required: ["email_id"], properties: { email_id: { type: "string" } } } },
   { name: "save_email_classification", description: "Set category and confidence on an email", inputSchema: { type: "object", required: ["email_id", "category", "confidence"], properties: { email_id: { type: "string" }, category: { type: "string" }, confidence: { type: "number" } } } },
   { name: "save_payment_transaction", description: "Save a payment transaction extracted from emails", inputSchema: { type: "object", required: ["email_ids", "amount", "currency", "merchant", "category", "occurred_at", "payment_method"], properties: { email_ids: { type: "array", items: { type: "string" } }, amount: { type: "number" }, currency: { type: "string" }, merchant: { type: "string" }, category: { type: "string" }, occurred_at: { type: "string" }, payment_method: { type: "string" }, reference_no: { type: "string" }, notes: { type: "string" } } } },
-  { name: "save_booking", description: "Save an activity booking extracted from an email", inputSchema: { type: "object", required: ["email_id", "activity_name", "venue", "scheduled_at", "status"], properties: { email_id: { type: "string" }, activity_name: { type: "string" }, venue: { type: "string" }, scheduled_at: { type: "string" }, status: { type: "string" }, instructor: { type: "string" }, booking_reference: { type: "string" }, notes: { type: "string" } } } },
+  { name: "save_booking", description: "Save an activity booking from a confirmation email. status: confirmed|waitlisted", inputSchema: { type: "object", required: ["email_id", "activity_name", "venue", "scheduled_at", "status"], properties: { email_id: { type: "string" }, activity_name: { type: "string" }, venue: { type: "string" }, scheduled_at: { type: "string" }, status: { type: "string" }, instructor: { type: "string" }, booking_reference: { type: "string" }, notes: { type: "string" } } } },
+  { name: "cancel_booking", description: "Update an existing booking to cancelled/late_cancelled/teacher_cancelled when a cancellation email arrives. Looks up by booking_id or booking_reference.", inputSchema: { type: "object", required: ["email_id"], properties: { email_id: { type: "string" }, booking_reference: { type: "string" }, booking_id: { type: "string" }, status: { type: "string", enum: ["cancelled", "late_cancelled", "teacher_cancelled"], default: "cancelled" }, notes: { type: "string" } } } },
   { name: "save_newsletter_activities", description: "Save activities extracted from a newsletter email", inputSchema: { type: "object", required: ["email_id", "sender_org", "title", "newsletter_date"], properties: { email_id: { type: "string" }, sender_org: { type: "string" }, title: { type: "string" }, newsletter_date: { type: "string" }, date_start: { type: "string" }, date_end: { type: "string" }, location: { type: "string" }, description: { type: "string" }, url: { type: "string" } } } },
   { name: "get_recent_transactions", description: "Return transactions within last N days", inputSchema: { type: "object", properties: { days: { type: "integer", default: 30 }, category: { type: "string" } } } },
   { name: "search_transactions", description: "Search transactions by merchant or notes", inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" } } } },
   { name: "get_transaction_summary", description: "Return total spend per category", inputSchema: { type: "object", properties: { days: { type: "integer", default: 30 } } } },
   { name: "split_transaction", description: "Split one transaction into multiple", inputSchema: { type: "object", required: ["transaction_id", "split_into"], properties: { transaction_id: { type: "string" }, split_into: { type: "array", items: { type: "object" } } } } },
-  { name: "get_upcoming_bookings", description: "Return bookings scheduled in the next N days", inputSchema: { type: "object", properties: { days: { type: "integer", default: 30 } } } },
+  { name: "get_upcoming_bookings", description: "Return bookings scheduled in the next N days. exclude_cancelled=true (default) hides cancelled/late_cancelled/teacher_cancelled.", inputSchema: { type: "object", properties: { days: { type: "integer", default: 30 }, exclude_cancelled: { type: "boolean", default: true } } } },
+  { name: "get_past_bookings", description: "Return bookings scheduled in the past N days. exclude_cancelled=false (default) includes all statuses.", inputSchema: { type: "object", properties: { days: { type: "integer", default: 30 }, exclude_cancelled: { type: "boolean", default: false } } } },
   { name: "search_bookings", description: "Search bookings by activity name or venue", inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" } } } },
   { name: "get_booking_detail", description: "Return full detail for a single booking", inputSchema: { type: "object", required: ["booking_id"], properties: { booking_id: { type: "string" } } } },
   { name: "get_newsletter_activities", description: "Return newsletter activities within last N days", inputSchema: { type: "object", properties: { days: { type: "integer", default: 30 } } } },
@@ -204,7 +206,7 @@ function getClientReady(): Promise<void> {
 export default function register(api: any): void {
   const scriptPath = path.resolve(_pluginDir, "main.py");
 
-  // Register all 19 tools synchronously — execute() awaits client readiness
+  // Register all 21 tools synchronously — execute() awaits client readiness
   api.logger.info(`[icloud-mail-mcp] register() called — registering ${TOOL_DEFS.length} tools synchronously`);
   for (const def of TOOL_DEFS) {
     const toolName = def.name;
@@ -238,7 +240,7 @@ export default function register(api: any): void {
       api.logger.info("[icloud-mail-mcp] Starting MCP server process...");
       _client.start(PYTHON, scriptPath, _pluginDir);
       await _client.initialize();
-      api.logger.info("[icloud-mail-mcp] MCP client ready (19 tools available)");
+      api.logger.info("[icloud-mail-mcp] MCP client ready (21 tools available)");
       _resolveReady!();
       _resolveReady = null;
     },

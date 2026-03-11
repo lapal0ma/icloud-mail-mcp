@@ -17,6 +17,7 @@ from tools.write_tools import (
     save_payment_transaction,
     save_booking,
     save_newsletter_activities,
+    cancel_booking,
 )
 from tools.payment_tools import (
     get_recent_transactions,
@@ -24,7 +25,7 @@ from tools.payment_tools import (
     get_transaction_summary,
     split_transaction,
 )
-from tools.booking_tools import get_upcoming_bookings, search_bookings, get_booking_detail
+from tools.booking_tools import get_upcoming_bookings, get_past_bookings, search_bookings, get_booking_detail
 from tools.newsletter_tools import get_newsletter_activities, search_newsletter_activities
 from tools.sync_tools import sync_now, get_sync_status, get_unprocessed_queue
 
@@ -46,13 +47,15 @@ TOOLS: list[Tool] = [
     Tool(name="get_email_detail", description="Return full detail for a single email", inputSchema={"type": "object", "required": ["email_id"], "properties": {"email_id": {"type": "string"}}}),
     Tool(name="save_email_classification", description="Set category and confidence on an email", inputSchema={"type": "object", "required": ["email_id", "category", "confidence"], "properties": {"email_id": {"type": "string"}, "category": {"type": "string"}, "confidence": {"type": "number"}}}),
     Tool(name="save_payment_transaction", description="Save a payment transaction extracted from emails", inputSchema={"type": "object", "required": ["email_ids", "amount", "currency", "merchant", "category", "occurred_at", "payment_method"], "properties": {"email_ids": {"type": "array", "items": {"type": "string"}}, "amount": {"type": "number"}, "currency": {"type": "string"}, "merchant": {"type": "string"}, "category": {"type": "string"}, "occurred_at": {"type": "string"}, "payment_method": {"type": "string"}, "reference_no": {"type": "string"}, "notes": {"type": "string"}}}),
-    Tool(name="save_booking", description="Save an activity booking extracted from an email", inputSchema={"type": "object", "required": ["email_id", "activity_name", "venue", "scheduled_at", "status"], "properties": {"email_id": {"type": "string"}, "activity_name": {"type": "string"}, "venue": {"type": "string"}, "scheduled_at": {"type": "string"}, "status": {"type": "string"}, "instructor": {"type": "string"}, "booking_reference": {"type": "string"}, "notes": {"type": "string"}}}),
+    Tool(name="save_booking", description="Save an activity booking from a confirmation email. status: confirmed|waitlisted", inputSchema={"type": "object", "required": ["email_id", "activity_name", "venue", "scheduled_at", "status"], "properties": {"email_id": {"type": "string"}, "activity_name": {"type": "string"}, "venue": {"type": "string"}, "scheduled_at": {"type": "string"}, "status": {"type": "string"}, "instructor": {"type": "string"}, "booking_reference": {"type": "string"}, "notes": {"type": "string"}}}),
+    Tool(name="cancel_booking", description="Update an existing booking to cancelled/late_cancelled/teacher_cancelled when a cancellation email arrives. Looks up by booking_id or booking_reference.", inputSchema={"type": "object", "required": ["email_id"], "properties": {"email_id": {"type": "string"}, "booking_reference": {"type": "string"}, "booking_id": {"type": "string"}, "status": {"type": "string", "enum": ["cancelled", "late_cancelled", "teacher_cancelled"], "default": "cancelled"}, "notes": {"type": "string"}}}),
     Tool(name="save_newsletter_activities", description="Save activities extracted from a newsletter email", inputSchema={"type": "object", "required": ["email_id", "sender_org", "title", "newsletter_date"], "properties": {"email_id": {"type": "string"}, "sender_org": {"type": "string"}, "title": {"type": "string"}, "newsletter_date": {"type": "string"}, "date_start": {"type": "string"}, "date_end": {"type": "string"}, "location": {"type": "string"}, "description": {"type": "string"}, "url": {"type": "string"}}}),
     Tool(name="get_recent_transactions", description="Return transactions within last N days", inputSchema={"type": "object", "properties": {"days": {"type": "integer", "default": 30}, "category": {"type": "string"}}}),
     Tool(name="search_transactions", description="Search transactions by merchant or notes", inputSchema={"type": "object", "required": ["query"], "properties": {"query": {"type": "string"}}}),
     Tool(name="get_transaction_summary", description="Return total spend per category", inputSchema={"type": "object", "properties": {"days": {"type": "integer", "default": 30}}}),
     Tool(name="split_transaction", description="Split one transaction into multiple", inputSchema={"type": "object", "required": ["transaction_id", "split_into"], "properties": {"transaction_id": {"type": "string"}, "split_into": {"type": "array", "items": {"type": "object"}}}}),
-    Tool(name="get_upcoming_bookings", description="Return bookings scheduled in the next N days", inputSchema={"type": "object", "properties": {"days": {"type": "integer", "default": 30}}}),
+    Tool(name="get_upcoming_bookings", description="Return bookings scheduled in the next N days. exclude_cancelled=true (default) hides cancelled/late_cancelled/teacher_cancelled.", inputSchema={"type": "object", "properties": {"days": {"type": "integer", "default": 30}, "exclude_cancelled": {"type": "boolean", "default": True}}}),
+    Tool(name="get_past_bookings", description="Return bookings scheduled in the past N days. exclude_cancelled=false (default) includes all statuses.", inputSchema={"type": "object", "properties": {"days": {"type": "integer", "default": 30}, "exclude_cancelled": {"type": "boolean", "default": False}}}),
     Tool(name="search_bookings", description="Search bookings by activity name or venue", inputSchema={"type": "object", "required": ["query"], "properties": {"query": {"type": "string"}}}),
     Tool(name="get_booking_detail", description="Return full detail for a single booking", inputSchema={"type": "object", "required": ["booking_id"], "properties": {"booking_id": {"type": "string"}}}),
     Tool(name="get_newsletter_activities", description="Return newsletter activities within last N days", inputSchema={"type": "object", "properties": {"days": {"type": "integer", "default": 30}}}),
@@ -89,6 +92,8 @@ async def _dispatch(name: str, args: dict):  # noqa: PLR0911
             return await save_payment_transaction(**args)
         case "save_booking":
             return {"booking_id": await save_booking(**args)}
+        case "cancel_booking":
+            return await cancel_booking(**args)
         case "save_newsletter_activities":
             return {"activity_id": await save_newsletter_activities(**args)}
         case "get_recent_transactions":
@@ -101,6 +106,8 @@ async def _dispatch(name: str, args: dict):  # noqa: PLR0911
             return await split_transaction(**args)
         case "get_upcoming_bookings":
             return await get_upcoming_bookings(**args)
+        case "get_past_bookings":
+            return await get_past_bookings(**args)
         case "search_bookings":
             return await search_bookings(**args)
         case "get_booking_detail":

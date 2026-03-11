@@ -31,7 +31,17 @@ CREATE TABLE IF NOT EXISTS raw_emails (
     category            TEXT,
     category_confidence REAL,
     processed           INTEGER DEFAULT 0,
+    filtered_reason     TEXT,
     created_at          TEXT
+);
+
+CREATE TABLE IF NOT EXISTS filter_stats (
+    id          TEXT PRIMARY KEY,
+    date        TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    count       INTEGER DEFAULT 0,
+    updated_at  TEXT,
+    UNIQUE(date, reason)
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -108,15 +118,18 @@ async def insert_raw_email(
     body_text: str,
     body_html: str,
     received_at: str,
+    filtered_reason: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> str:
     email_id = new_id()
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
             """INSERT OR IGNORE INTO raw_emails
-               (id, uid, sender, subject, body_text, body_html, received_at, processed, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)""",
-            (email_id, uid, sender, subject, body_text, body_html, received_at, now_hkt()),
+               (id, uid, sender, subject, body_text, body_html, received_at,
+                processed, filtered_reason, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+            (email_id, uid, sender, subject, body_text, body_html, received_at,
+             filtered_reason, now_hkt()),
         )
         await db.commit()
     return email_id
@@ -296,16 +309,37 @@ async def list_bookings(
             return [dict(r) for r in await cur.fetchall()]
 
 
-async def update_booking(booking_id: str, db_path: str = DB_PATH, **fields) -> None:
-    if not fields:
-        return
-    cols = ", ".join(f"{k} = ?" for k in fields)
+async def update_booking_status(
+    booking_id: str,
+    status: str,
+    notes: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> None:
     async with aiosqlite.connect(db_path) as db:
-        await db.execute(
-            f"UPDATE bookings SET {cols} WHERE id = ?",
-            (*fields.values(), booking_id),
-        )
+        if notes is not None:
+            await db.execute(
+                "UPDATE bookings SET status = ?, notes = ? WHERE id = ?",
+                (status, notes, booking_id),
+            )
+        else:
+            await db.execute(
+                "UPDATE bookings SET status = ? WHERE id = ?",
+                (status, booking_id),
+            )
         await db.commit()
+
+
+async def find_booking_by_reference(
+    booking_reference: str, db_path: str = DB_PATH
+) -> Optional[dict]:
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM bookings WHERE booking_reference = ? ORDER BY created_at DESC LIMIT 1",
+            (booking_reference,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
 
 # ---------------------------------------------------------------------------
@@ -392,5 +426,35 @@ async def list_unprocessed_queue(db_path: str = DB_PATH) -> list[dict]:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM unprocessed_queue ORDER BY created_at"
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# filter_stats
+# ---------------------------------------------------------------------------
+
+async def bump_filter_stat(reason: str, date: str, db_path: str = DB_PATH) -> None:
+    """Increment the daily counter for a filter reason (upsert)."""
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """INSERT INTO filter_stats (id, date, reason, count, updated_at)
+               VALUES (?, ?, ?, 1, ?)
+               ON CONFLICT(date, reason) DO UPDATE SET
+                 count = count + 1,
+                 updated_at = excluded.updated_at""",
+            (new_id(), date, reason, now_hkt()),
+        )
+        await db.commit()
+
+
+async def get_filter_stats(days: int = 7, db_path: str = DB_PATH) -> list[dict]:
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT date, reason, count FROM filter_stats
+               WHERE date >= date('now', ?)
+               ORDER BY date DESC, count DESC""",
+            (f"-{days} days",),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]

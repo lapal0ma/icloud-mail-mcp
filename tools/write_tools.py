@@ -9,6 +9,8 @@ from database import (
     link_transaction_email,
     insert_booking,
     insert_newsletter_activity,
+    update_booking_status,
+    find_booking_by_reference,
 )
 from deduplicator import check_duplicate
 
@@ -98,7 +100,10 @@ async def save_booking(
     notes: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> str:
-    """Insert booking and mark email processed=2. Returns booking id."""
+    """Insert booking and mark email processed=2. Returns booking id.
+    status values: confirmed | cancelled | late_cancelled | teacher_cancelled | waitlisted
+    For cancellation emails, prefer update_booking_status if a booking_reference matches an existing record.
+    """
     booking_id = await insert_booking(
         email_id=email_id,
         activity_name=activity_name,
@@ -145,3 +150,31 @@ async def save_newsletter_activities(
         await db.execute("UPDATE raw_emails SET processed = 2 WHERE id = ?", (email_id,))
         await db.commit()
     return activity_id
+
+
+async def cancel_booking(
+    email_id: str,
+    booking_reference: Optional[str] = None,
+    booking_id: Optional[str] = None,
+    status: str = "cancelled",
+    notes: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> dict:
+    """Update an existing booking's status to cancelled/late_cancelled/teacher_cancelled.
+    Looks up by booking_id first, then booking_reference. Marks email processed=2.
+    status values: cancelled | late_cancelled | teacher_cancelled
+    """
+    target_id = booking_id
+    if not target_id and booking_reference:
+        existing = await find_booking_by_reference(booking_reference, db_path=db_path)
+        if existing:
+            target_id = existing["id"]
+
+    if not target_id:
+        return {"error": "No matching booking found", "booking_reference": booking_reference}
+
+    await update_booking_status(target_id, status=status, notes=notes, db_path=db_path)
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("UPDATE raw_emails SET processed = 2 WHERE id = ?", (email_id,))
+        await db.commit()
+    return {"booking_id": target_id, "status": status}

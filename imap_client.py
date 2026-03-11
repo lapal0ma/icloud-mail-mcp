@@ -10,7 +10,8 @@ import aioimaplib
 from bs4 import BeautifulSoup
 
 from config import ICLOUD_EMAIL, ICLOUD_APP_PASSWORD
-from database import insert_raw_email, update_email_category
+from database import insert_raw_email, update_email_category, bump_filter_stat
+from email_filter import should_filter
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,11 @@ IMAP_PORT = 993
 HKT = timezone(timedelta(hours=8))
 
 SENSITIVE_KEYWORDS = [
-    "验证码", "otp", "one-time password", "verification code",
-    "verify your email", "confirm your email", "登录提醒",
-    "new sign-in", "new login", "reset your password",
-    "forgot password", "两步验证", "2fa", "two-factor",
-    "security alert", "安全提醒",
+    "验证码", "otp", "one-time password", "one time password",
+    "verification code", "verify your email", "confirm your email",
+    "reset your password", "forgot password",
+    "两步验证", "2fa", "two-factor", "two factor",
+    "登录提醒", "new sign-in", "new login",
 ]
 
 
@@ -175,6 +176,9 @@ async def fetch_new_emails(
                     )
                     logger.info("Stored sensitive email uid=%s as redacted", uid)
                 else:
+                    filter_reason = await should_filter(
+                        parsed["sender"], parsed["subject"], db_path=db_path
+                    )
                     email_id = await insert_raw_email(
                         uid=uid,
                         sender=parsed["sender"],
@@ -182,9 +186,22 @@ async def fetch_new_emails(
                         body_text=parsed["body_text"],
                         body_html=parsed["body_html"],
                         received_at=parsed["received_at"],
+                        filtered_reason=filter_reason,
                         db_path=db_path,
                     )
-                    logger.info("Stored email uid=%s id=%s", uid, email_id)
+                    if filter_reason:
+                        today = parsed["received_at"][:10]
+                        await bump_filter_stat(filter_reason, today, db_path=db_path)
+                        await update_email_category(
+                            email_id=email_id,
+                            category=filter_reason,
+                            confidence=1.0,
+                            processed=-2,
+                            db_path=db_path,
+                        )
+                        logger.info("Filtered email uid=%s reason=%s", uid, filter_reason)
+                    else:
+                        logger.info("Stored email uid=%s id=%s", uid, email_id)
 
                 stored_ids.append(email_id)
 

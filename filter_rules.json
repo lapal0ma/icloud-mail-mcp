@@ -1,0 +1,66 @@
+{
+  "mailing_lists": {
+    "enabled": true,
+    "sender_patterns": [
+      "-dev@",
+      "-discuss@",
+      "-community@",
+      "-announce@",
+      "-commits@",
+      "-issues@",
+      "-notifications@",
+      "@*.apache.org",
+      "@lists.",
+      "@groups.",
+      "@googlegroups.com",
+      "@freelists.org"
+    ],
+    "reason": "mailing_list"
+  },
+  "high_freq_promo": {
+    "enabled": true,
+    "threshold_per_week": 1,
+    "senders": [
+      "newsletter@news.sasa.com.hk",
+      "hello-asia@e.lululemon.com",
+      "noreply@edm.iteshop.com",
+      "no-reply@mkt.yohohongkong.com",
+      "support@rastaclat.com"
+    ],
+    "reason": "high_freq_promo"
+  },
+  "sender_patterns": {
+    "enabled": true,
+    "domain_allowlist": [
+      "hangsengebanking.com",
+      "*.uber.com",
+      "alipay.hk",
+      "alipayhk.com",
+      "mindbodyonline.com",
+      "payme.hsbc.com.hk",
+      "standardchartered.com",
+      "mox.com",
+      "za.group",
+      "*.apple.com"
+    ],
+    "local_part_suffixes": [
+      "-newsletter",
+      "-marketing",
+      "-edm",
+      ".newsletter",
+      ".marketing",
+      ".edm"
+    ],
+    "local_part_prefixes": [],
+    "reason": "promo_sender_pattern"
+  },
+  "subject_urgency": {
+    "enabled": true,
+    "keywords": [
+      "🚨", "⏰", "final chance", "last day", "last chance",
+      "limited time", "expires today", "ending soon",
+      "don't miss", "act now", "hurry", "flash sale"
+    ],
+    "reason": "urgency_subject"
+  }
+}
