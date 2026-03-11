@@ -171,7 +171,7 @@ async def fetch_new_emails(
                 parsed = _parse_message(raw)
 
                 if _is_sensitive(parsed["subject"], parsed["body_text"]):
-                    email_id = await insert_raw_email(
+                    email_id, is_new = await insert_raw_email(
                         uid=uid,
                         sender=parsed["sender"],
                         subject=parsed["subject"][:10] + "***",
@@ -180,6 +180,8 @@ async def fetch_new_emails(
                         received_at=parsed["received_at"],
                         db_path=db_path,
                     )
+                    if not is_new:
+                        continue
                     await update_email_category(
                         email_id=email_id,
                         category="security_sensitive",
@@ -193,7 +195,7 @@ async def fetch_new_emails(
                         parsed["sender"], parsed["subject"],
                         list_id=parsed["list_id"], db_path=db_path
                     )
-                    email_id = await insert_raw_email(
+                    email_id, is_new = await insert_raw_email(
                         uid=uid,
                         sender=parsed["sender"],
                         subject=parsed["subject"],
@@ -203,6 +205,8 @@ async def fetch_new_emails(
                         filtered_reason=filter_reason,
                         db_path=db_path,
                     )
+                    if not is_new:
+                        continue
                     if filter_reason:
                         today = parsed["received_at"][:10]
                         await bump_filter_stat(filter_reason, today, db_path=db_path)

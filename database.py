@@ -143,10 +143,11 @@ async def insert_raw_email(
     received_at: str,
     filtered_reason: Optional[str] = None,
     db_path: str = DB_PATH,
-) -> str:
+) -> tuple[str, bool]:
+    """Returns (email_id, is_new). is_new=False means the uid already existed (INSERT OR IGNORE skipped)."""
     email_id = new_id()
     async with aiosqlite.connect(db_path) as db:
-        await db.execute(
+        cursor = await db.execute(
             """INSERT OR IGNORE INTO raw_emails
                (id, uid, sender, subject, body_text, body_html, received_at,
                 processed, filtered_reason, created_at)
@@ -155,7 +156,13 @@ async def insert_raw_email(
              filtered_reason, now_hkt()),
         )
         await db.commit()
-    return email_id
+        if cursor.rowcount == 0:
+            # Already exists — fetch the real id
+            async with db.execute("SELECT id FROM raw_emails WHERE uid = ?", (uid,)) as cur:
+                row = await cur.fetchone()
+                email_id = row[0] if row else email_id
+            return email_id, False
+    return email_id, True
 
 
 async def get_raw_email(email_id: str, db_path: str = DB_PATH) -> Optional[dict]:
