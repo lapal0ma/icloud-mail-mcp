@@ -58,6 +58,7 @@ def _parse_message(raw_bytes: bytes) -> dict:
 
     subject = _decode_header_value(msg.get("Subject", ""))
     sender = _decode_header_value(msg.get("From", ""))
+    list_id = msg.get("List-Id", "") or msg.get("X-Mailing-List", "")
     date_str = msg.get("Date", "")
 
     try:
@@ -95,6 +96,7 @@ def _parse_message(raw_bytes: bytes) -> dict:
     return {
         "subject": subject,
         "sender": sender,
+        "list_id": list_id,
         "received_at": received_at,
         "body_text": body_text,
         "body_html": body_html,
@@ -177,7 +179,8 @@ async def fetch_new_emails(
                     logger.info("Stored sensitive email uid=%s as redacted", uid)
                 else:
                     filter_reason = await should_filter(
-                        parsed["sender"], parsed["subject"], db_path=db_path
+                        parsed["sender"], parsed["subject"],
+                        list_id=parsed["list_id"], db_path=db_path
                     )
                     email_id = await insert_raw_email(
                         uid=uid,

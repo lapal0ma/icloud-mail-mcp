@@ -46,10 +46,13 @@ def _domain(addr: str) -> str:
 # Individual rule checkers
 # ---------------------------------------------------------------------------
 
-def _check_mailing_list(addr: str, rules: dict) -> Optional[str]:
+def _check_mailing_list(addr: str, rules: dict, list_id: str = "") -> Optional[str]:
     cfg = rules.get("mailing_lists", {})
     if not cfg.get("enabled"):
         return None
+    # List-Id header is definitive — any non-empty value means it's a mailing list
+    if list_id.strip():
+        return cfg["reason"]
     for pattern in cfg.get("sender_patterns", []):
         if pattern.startswith("@*."):
             # domain glob: @*.apache.org matches anything.apache.org
@@ -123,6 +126,7 @@ async def _check_high_freq_promo(addr: str, rules: dict, db_path: str) -> Option
 async def should_filter(
     sender: str,
     subject: str,
+    list_id: str = "",
     db_path: str = DB_PATH,
 ) -> Optional[str]:
     """
@@ -132,7 +136,7 @@ async def should_filter(
     rules = _load_rules()
     addr = _extract_email_address(sender)
 
-    reason = _check_mailing_list(addr, rules)
+    reason = _check_mailing_list(addr, rules, list_id=list_id)
     if reason:
         return reason
 

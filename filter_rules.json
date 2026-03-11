@@ -10,6 +10,7 @@
       "-issues@",
       "-notifications@",
       "@*.apache.org",
+      "@apache.org",
       "@lists.",
       "@groups.",
       "@googlegroups.com",
