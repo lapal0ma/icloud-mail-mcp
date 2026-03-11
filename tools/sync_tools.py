@@ -37,6 +37,9 @@ async def get_sync_status(db_path: str = DB_PATH) -> dict:
             sensitive = await scalar(
                 "SELECT COUNT(*) FROM raw_emails WHERE processed = -1"
             )
+            rule_filtered = await scalar(
+                "SELECT COUNT(*) FROM raw_emails WHERE processed = -2"
+            )
             queue = await scalar("SELECT COUNT(*) FROM unprocessed_queue")
 
         return {
@@ -44,6 +47,7 @@ async def get_sync_status(db_path: str = DB_PATH) -> dict:
             "total_emails": total,
             "unclassified_count": unclassified,
             "sensitive_filtered_count": sensitive,
+            "rule_filtered_count": rule_filtered,
             "unprocessed_queue_count": queue,
         }
     except Exception as exc:
