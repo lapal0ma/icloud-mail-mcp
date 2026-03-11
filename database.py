@@ -105,6 +105,23 @@ async def create_tables(db_path: str = DB_PATH) -> None:
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(CREATE_TABLES_SQL)
         await db.commit()
+    await _migrate(db_path)
+
+
+# Columns to add if missing: (table, column, definition)
+_MIGRATIONS = [
+    ("raw_emails", "filtered_reason", "TEXT"),
+]
+
+
+async def _migrate(db_path: str = DB_PATH) -> None:
+    async with aiosqlite.connect(db_path) as db:
+        for table, column, definition in _MIGRATIONS:
+            async with db.execute(f"PRAGMA table_info({table})") as cur:
+                cols = {row[1] for row in await cur.fetchall()}
+            if column not in cols:
+                await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                await db.commit()
 
 
 # ---------------------------------------------------------------------------
