@@ -126,6 +126,7 @@ async def fetch_new_emails(
     mailbox: str = "INBOX",
     since_days: int = 7,
     since_date: Optional[str] = None,
+    max_age_days: int = 90,
     db_path: str = "icloud_mail.db",
 ) -> list[str]:
     """
@@ -138,6 +139,7 @@ async def fetch_new_emails(
     client = await _connect_with_retry()
     stored_ids: list[str] = []
     state_key = f"last_sync_date_{mailbox}"
+    oldest_allowed = (datetime.now(HKT) - timedelta(days=max_age_days)).isoformat()
 
     try:
         await client.select(mailbox)
@@ -169,6 +171,14 @@ async def fetch_new_emails(
                 raw = bytes(raw)
 
                 parsed = _parse_message(raw)
+
+                # Guard against iCloud returning old emails due to internal date bumps
+                if parsed["received_at"] < oldest_allowed:
+                    logger.warning(
+                        "Skipping ancient email uid=%s received_at=%s (older than %d days)",
+                        uid, parsed["received_at"][:10], max_age_days,
+                    )
+                    continue
 
                 if _is_sensitive(parsed["subject"], parsed["body_text"]):
                     email_id, is_new = await insert_raw_email(
